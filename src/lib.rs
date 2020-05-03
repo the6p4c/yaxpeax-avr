@@ -22,7 +22,7 @@
 //!   invalid.
 extern crate yaxpeax_arch;
 
-use yaxpeax_arch::{Arch, Decoder, LengthedInstruction};
+use yaxpeax_arch::{Arch, AddressDiff, Decoder, LengthedInstruction};
 
 use std::fmt;
 
@@ -414,14 +414,14 @@ impl yaxpeax_arch::Instruction for Instruction {
 }
 
 impl LengthedInstruction for Instruction {
-    type Unit = <AVR as Arch>::Address;
+    type Unit = AddressDiff<<AVR as Arch>::Address>;
 
     fn min_size() -> Self::Unit {
-        2
+        AddressDiff::from_const(2)
     }
 
     fn len(&self) -> Self::Unit {
-        self.length as Self::Unit
+        AddressDiff::from_const(self.length as <AVR as Arch>::Address)
     }
 }
 

@@ -22,7 +22,7 @@
 //!   invalid.
 extern crate yaxpeax_arch;
 
-use yaxpeax_arch::{Arch, AddressDiff, Decoder, LengthedInstruction};
+use yaxpeax_arch::{Arch, AddressDiff, Decoder, LengthedInstruction, Reader, StandardDecodeError};
 
 use std::fmt;
 
@@ -426,37 +426,6 @@ impl LengthedInstruction for Instruction {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub enum DecodeError {
-    ExhaustedInput,
-    InvalidOpcode,
-    InvalidOperand,
-}
-
-impl fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            DecodeError::ExhaustedInput => write!(f, "exhausted input"),
-            DecodeError::InvalidOpcode => write!(f, "invalid opcode"),
-            DecodeError::InvalidOperand => write!(f, "invalid operand"),
-        }
-    }
-}
-
-impl yaxpeax_arch::DecodeError for DecodeError {
-    fn data_exhausted(&self) -> bool {
-        self == &DecodeError::ExhaustedInput
-    }
-
-    fn bad_opcode(&self) -> bool {
-        self == &DecodeError::InvalidOpcode
-    }
-
-    fn bad_operand(&self) -> bool {
-        self == &DecodeError::InvalidOperand
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Target {
     /// True if the target supports the 16-bit variants of the `lds` and `sts`
     /// instructions.
@@ -692,37 +661,21 @@ impl Default for InstDecoder {
     }
 }
 
-impl Decoder<Instruction> for InstDecoder {
-    type Error = DecodeError;
-
+impl Decoder<AVR> for InstDecoder {
     // Variable names in the interpretation match block try and copy the
     // instruction set manual, which leads to variable names like 'K' and 'A'.
     // We'll prefer matching the manual's conventions than pleasing rustc.
     #[allow(non_snake_case)]
-    fn decode_into<T: IntoIterator<Item = u8>>(
+    fn decode_into<T: Reader<<AVR as Arch>::Address, <AVR as Arch>::Word>>(
         &self,
         instr: &mut Instruction,
-        bytes: T,
-    ) -> Result<(), Self::Error> {
-        fn read_word<T: Iterator<Item = u8>>(bytes: &mut T) -> Result<u16, DecodeError> {
-            let word: Vec<u8> = bytes.by_ref().take(2).collect();
+        words: &mut T,
+    ) -> Result<(), <AVR as Arch>::DecodeError> {
+        words.mark();
+        let fullword = (words.next()? as u16) | ((words.next()? as u16) << 8);
 
-            let (low, high) = match word[..] {
-                [low, high] => (low, high),
-                [] | [_] => {
-                    return Err(DecodeError::ExhaustedInput);
-                }
-                _ => unreachable!(),
-            };
-
-            let fullword = ((high as u16) << 8) | (low as u16);
-            Ok(fullword)
-        }
-
-        let mut bytes_iter = bytes.into_iter();
-        let fullword = read_word(&mut bytes_iter)?;
-
-        let (opcode, interpretation) = decode_opcode(fullword, &self.target).ok_or(DecodeError::InvalidOpcode)?;
+        let (opcode, interpretation) = decode_opcode(fullword, &self.target)
+            .ok_or(StandardDecodeError::InvalidOpcode)?;
         instr.opcode = opcode;
 
         for (interp, operand) in interpretation.iter().zip(instr.operands.iter_mut()) {
@@ -838,15 +791,13 @@ impl Decoder<Instruction> for InstDecoder {
                     Operand::AddrAbsolute(k as u32)
                 },
                 OperandSpec::Addr16 => {
-                    let k = read_word(&mut bytes_iter)?;
-                    instr.length += 2;
+                    let k = (words.next()? as u16) | ((words.next()? as u16) << 8);
 
                     Operand::AddrAbsolute(k as u32)
                 },
                 OperandSpec::Addr22 => {
                     let A_high = ((fullword >> 3) & 0b11_1110) | (fullword & 0b1);
-                    let A_low = read_word(&mut bytes_iter)?;
-                    instr.length += 2;
+                    let A_low = (words.next()? as u16) | ((words.next()? as u16) << 8);
 
                     let A = ((A_high as u32) << 16) | (A_low as u32);
                     // Word address (into program memory), convert to bytes
@@ -857,6 +808,7 @@ impl Decoder<Instruction> for InstDecoder {
             }
         }
 
+        instr.length = words.offset() as u8;
         Ok(())
     }
 }
@@ -868,8 +820,9 @@ impl Arch for AVR {
     // TODO: Possibly distinguish between program memory and data memory
     // addresses
     type Address = u32;
+    type Word = u8;
     type Instruction = Instruction;
-    type DecodeError = DecodeError;
+    type DecodeError = StandardDecodeError;
     type Decoder = InstDecoder;
     type Operand = Operand;
 }

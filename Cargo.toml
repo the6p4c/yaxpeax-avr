@@ -2,7 +2,7 @@
 name = "yaxpeax-avr"
 description = "AVR instruction set decoder for yaxpeax"
 authors = [ "The6P4C <watsonjcampbell@gmail.com>" ]
-version = "0.0.3"
+version = "0.1.0"
 license = "0BSD"
 edition = "2018"
 repository = "https://github.com/The6P4C/yaxpeax-avr"
